@@ -1,3 +1,5 @@
+[![PkgGoDev](https://pkg.go.dev/github.com/tbiehn/gptparallel)](https://pkg.go.dev/github.com/tbiehn/gptparallel)
+
 # GPT Parallel
 
 GPT Parallel is an early beta library for the Go programming language that helps you manage multiple concurrent requests to the OpenAI API and OpenAI Azure. It's built on top of the go-openai package and is designed to make it easier to handle multiple requests, track progress, and apply retries with a customizable exponential backoff strategy.
