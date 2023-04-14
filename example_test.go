@@ -52,3 +52,54 @@ func Example() {
 	// Output:
 	// Received response!
 }
+
+func ExampleRunRequestsChan() {
+	client := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
+	ctx := context.Background()
+
+	backoffSettings := backoff.NewExponentialBackOff()
+
+	g := gptparallel.NewGPTParallel(ctx, client, nil, backoffSettings, nil)
+
+	requestsChan := make(chan gptparallel.RequestWithCallback)
+
+	go func() {
+		for i := 0; i < 5; i++ {
+			request := openai.ChatCompletionRequest{
+				Model:       "gpt-3.5-turbo",
+				Messages:    []openai.ChatCompletionMessage{{Role: "system", Content: "You are a helpful assistant."}, {Role: "user", Content: fmt.Sprintf("What is %d * %d?", i+1, i+2)}},
+				MaxTokens:   10,
+				Temperature: 0,
+			}
+			requestsChan <- gptparallel.RequestWithCallback{
+				Request: request,
+				Callback: func(result gptparallel.RequestResult) {
+					if result.Err != nil {
+						fmt.Printf("Request failed: %v\n", result.Err)
+					} else {
+						fmt.Printf("Result:\n")
+					}
+				},
+			}
+		}
+		close(requestsChan)
+	}()
+
+	resultsChan := g.RunRequestsChan(requestsChan, 2)
+
+	for result := range resultsChan {
+		if result.Err != nil {
+			fmt.Printf("Request failed: %v\n", result.Err)
+		} else {
+			fmt.Print("Result:\n") // elide result to satisfy, result.Response)
+		}
+	}
+	// We've made the test dumb to account for un-mocked openai.
+	// Unordered output:
+	// Result:
+	// Result:
+	// Result:
+	// Result:
+	// Result:
+
+}

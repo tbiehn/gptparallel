@@ -20,14 +20,16 @@ import (
 // RequestWithCallback: A struct containing an openai.ChatCompletionRequest and a callback function to process the request result.
 
 type RequestWithCallback struct {
-	Request  openai.ChatCompletionRequest
-	Callback func(result RequestResult)
+	Request    openai.ChatCompletionRequest
+	Callback   func(result RequestResult)
+	Identifier string
 }
 
 // RequestResult: A struct containing the original request, the response, the finish reason, and any errors that occurred during the request.
 type RequestResult struct {
 	Request      openai.ChatCompletionRequest
 	Response     string
+	Identifier   string
 	FinishReason string
 	Err          error
 }
@@ -94,6 +96,7 @@ func (g *GPTParallel) RunRequests(requests []RequestWithCallback, concurrency in
 				reqWithCallback.Callback(RequestResult{
 					Request:      reqWithCallback.Request,
 					FinishReason: finish,
+					Identifier:   reqWithCallback.Identifier,
 					Response:     result,
 					Err:          err,
 				})
@@ -109,12 +112,88 @@ func (g *GPTParallel) RunRequests(requests []RequestWithCallback, concurrency in
 		requestsChan <- reqWithCallback
 	}
 
-	close(requestsChan)
 	wg.Wait()
+
+	close(requestsChan)
+
 	if overallBar != nil {
 		overallBar.Abort(true)
 	}
 
+}
+
+// RunRequestsChan: A method that executes requests received from a channel in parallel with the given concurrency level, manages progress bars and retries, and sends results to a channel.
+func (g *GPTParallel) RunRequestsChan(requestsChan <-chan RequestWithCallback, concurrency int) <-chan RequestResult {
+	resultsChan := make(chan RequestResult)
+
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	// Calculate the total number of tokens in all requests
+	var totalTokens int64
+
+	var overallBar *mpb.Bar
+	if g.Progress != nil {
+		overallBar = g.Progress.AddBar(totalTokens,
+			mpb.BarPriority(-1),
+			mpb.PrependDecorators(
+				decor.Name("Overall: "),
+				decor.CountersNoUnit(" (%d/%d)"),
+			),
+			mpb.AppendDecorators(
+				decor.OnComplete(
+					decor.AverageETA(decor.ET_STYLE_GO, decor.WCSyncWidth), "completed",
+				),
+			),
+		)
+	}
+
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		barName := fmt.Sprintf("Query # %d", i)
+		go func() {
+			defer wg.Done()
+			for reqWithCallback := range requestsChan {
+				totalTokens += int64(reqWithCallback.Request.MaxTokens)
+				if overallBar != nil {
+					overallBar.SetTotal(totalTokens, false)
+				}
+
+				result, finish, err := g.chatCompletionWithExponentialBackoff(barName, reqWithCallback.Request)
+				go reqWithCallback.Callback(RequestResult{
+					Request:      reqWithCallback.Request,
+					FinishReason: finish,
+					Response:     result,
+					Identifier:   reqWithCallback.Identifier,
+					Err:          err,
+				})
+
+				resultsChan <- RequestResult{
+					Request:      reqWithCallback.Request,
+					FinishReason: finish,
+					Response:     result,
+					Identifier:   reqWithCallback.Identifier,
+					Err:          err,
+				}
+				if overallBar != nil {
+					overallBar.IncrBy(reqWithCallback.Request.MaxTokens)
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		if overallBar != nil {
+			overallBar.Abort(true)
+		}
+		close(resultsChan)
+	}()
+
+	return resultsChan
 }
 
 func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest, bar *mpb.Bar) (string, string, error) {
@@ -169,7 +248,7 @@ func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest
 			chunk := response.Choices[0].Delta.Content
 			result += chunk
 			lastFinish = response.Choices[0].FinishReason
-			g.Logger.Debug("Finish reason", response.Choices[0].FinishReason)
+			//g.Logger.Debug("Finish reason", response.Choices[0].FinishReason)
 
 			if bar != nil {
 				tokenCount := len(encoding.Encode(chunk, nil, nil))
@@ -294,6 +373,8 @@ func (g *GPTParallel) chatCompletionWithExponentialBackoff(name string, req open
 	err := backoff.RetryNotify(operation, backoffContext, notify)
 	return result, finish, err
 }
+
+// We've omitted 'Fatal' errors. This library shouldn't cause any panics or os.Exit()s.
 
 // Logger: An interface to support different logging implementations, with a default no-op Logger provided.
 type Logger interface {
