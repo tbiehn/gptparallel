@@ -27,11 +27,11 @@ type RequestWithCallback struct {
 
 // RequestResult: A struct containing the original request, the response, the finish reason, and any errors that occurred during the request.
 type RequestResult struct {
-	Request      openai.ChatCompletionRequest
-	Response     string
-	Identifier   string
-	FinishReason string
-	Err          error
+	Request      openai.ChatCompletionRequest `json:"request"`
+	Response     string                       `json:"response"`
+	Identifier   string                       `json:"identifier"`
+	FinishReason string                       `json:"finish_reason"`
+	Err          error                        `json:"error,omitempty"`
 }
 
 // GPTParallel: The main struct responsible for managing concurrent requests, progress bars, and backoff settings.
