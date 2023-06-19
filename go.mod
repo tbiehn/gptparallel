@@ -1,4 +1,4 @@
-module gptparallel
+module github.com/tbiehn/gptparallel
 
 go 1.18
 
@@ -7,7 +7,6 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.3
 	github.com/sashabaranov/go-openai v1.11.2
 	github.com/stretchr/testify v1.8.4
-	github.com/tbiehn/gptparallel v0.2.1
 	github.com/vbauerster/mpb/v8 v8.4.0
 )
 
