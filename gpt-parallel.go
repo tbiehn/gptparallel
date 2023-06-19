@@ -247,7 +247,7 @@ func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest
 		if len(response.Choices) > 0 {
 			chunk := response.Choices[0].Delta.Content
 			result += chunk
-			lastFinish = response.Choices[0].FinishReason
+			lastFinish = string(response.Choices[0].FinishReason)
 			//g.Logger.Debug("Finish reason", response.Choices[0].FinishReason)
 
 			if bar != nil {
@@ -309,7 +309,7 @@ func (g *GPTParallel) chatCompletionWithExponentialBackoff(name string, req open
 		g.Logger.Debugf("Error: %T %+v", err, err)
 		var apiErr *openai.APIError
 		if errors.As(err, &apiErr) {
-			g.Logger.Debugf("Received an APIError: %d, %s, %s, %s", apiErr.StatusCode, apiErr.Type, apiErr)
+			g.Logger.Debugf("Received an APIError: %d, %s, %s, %s", "nil", apiErr.Type, apiErr)
 			//apiErr.StatusCode is 0 when Streaming.
 			switch apiErr.Type {
 			case "invalid_request_error":
@@ -321,7 +321,7 @@ func (g *GPTParallel) chatCompletionWithExponentialBackoff(name string, req open
 		}
 		var reqErr *openai.RequestError
 		if errors.As(err, &reqErr) {
-			g.Logger.Errorf("Received RequestError: %s, %d", reqErr.Err, reqErr.StatusCode)
+			g.Logger.Errorf("Received RequestError: %s, %d", reqErr.Err, "nil")
 		}
 
 		//This error doesn't follow the standard.
