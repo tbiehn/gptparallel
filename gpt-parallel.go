@@ -124,11 +124,11 @@ func (g *GPTParallel) RunRequests(requests []RequestWithCallback, concurrency in
 
 // RunRequestsChan: A method that executes requests received from a channel in parallel with the given concurrency level, manages progress bars and retries, and sends results to a channel.
 func (g *GPTParallel) RunRequestsChan(requestsChan <-chan RequestWithCallback, concurrency int) <-chan RequestResult {
-	resultsChan := make(chan RequestResult)
-
 	if concurrency <= 0 {
 		concurrency = 1
 	}
+
+	resultsChan := make(chan RequestResult, concurrency*2)
 
 	// Calculate the total number of tokens in all requests
 	var totalTokens int64
@@ -395,11 +395,11 @@ type VectorRequestResult struct {
 
 // RunEmbeddingsChan: A method that executes requests received from a channel in parallel with the given concurrency level, manages progress bars and retries, and sends results to a channel.
 func (g *GPTParallel) RunEmbeddingsChan(requestsChan <-chan VectorRequestWithCallback, concurrency int) <-chan VectorRequestResult {
-	resultsChan := make(chan VectorRequestResult)
 
 	if concurrency <= 0 {
 		concurrency = 1
 	}
+	resultsChan := make(chan VectorRequestResult, concurrency*2)
 
 	// Calculate the total number of tokens in all requests
 	var totalTokens int64
