@@ -211,18 +211,18 @@ func (g *GPTParallel) RunRequestsChan(requestsChan <-chan RequestWithCallback, c
 }
 
 func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest, bar *mpb.Bar) (*ResponseWithFunction, string, error) {
-	req.Stream = true
-	stream, err := g.Client.CreateChatCompletionStream(g.ctx, req)
-	if err != nil {
-		return nil, "", err
-	}
-	defer stream.Close()
-
 	res := &ResponseWithFunction{
 		Response:       "",
 		FunctionName:   "",
 		FunctionParams: "",
 	}
+
+	req.Stream = true
+	stream, err := g.Client.CreateChatCompletionStream(g.ctx, req)
+	if err != nil {
+		return res, "", err
+	}
+	defer stream.Close()
 
 	// Get encoding
 	model := req.Model
@@ -238,7 +238,7 @@ func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest
 
 	encoding, err := tiktoken.EncodingForModel(model)
 	if err != nil {
-		return nil, "", err
+		return res, "", err
 	}
 
 	lastFinish := ""
