@@ -17,6 +17,12 @@ import (
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
+type ResponseWithFunction struct {
+	Response       string
+	FunctionName   string
+	FunctionParams string
+}
+
 // RequestWithCallback: A struct containing an openai.ChatCompletionRequest and a callback function to process the request result.
 
 type RequestWithCallback struct {
@@ -27,11 +33,13 @@ type RequestWithCallback struct {
 
 // RequestResult: A struct containing the original request, the response, the finish reason, and any errors that occurred during the request.
 type RequestResult struct {
-	Request      openai.ChatCompletionRequest `json:"request"`
-	Response     string                       `json:"response"`
-	Identifier   string                       `json:"identifier"`
-	FinishReason string                       `json:"finish_reason"`
-	Err          error                        `json:"error,omitempty"`
+	Request        openai.ChatCompletionRequest `json:"request"`
+	Response       string                       `json:"response"`
+	FunctionName   string                       `json:"function_name",omitempty`
+	FunctionParams string                       `json:"function_params",omitempty`
+	Identifier     string                       `json:"identifier"`
+	FinishReason   string                       `json:"finish_reason"`
+	Err            error                        `json:"error,omitempty"`
 }
 
 // GPTParallel: The main struct responsible for managing concurrent requests, progress bars, and backoff settings.
@@ -94,11 +102,13 @@ func (g *GPTParallel) RunRequests(requests []RequestWithCallback, concurrency in
 			for reqWithCallback := range requestsChan {
 				result, finish, err := g.chatCompletionWithExponentialBackoff(barName, reqWithCallback.Request)
 				reqWithCallback.Callback(RequestResult{
-					Request:      reqWithCallback.Request,
-					FinishReason: finish,
-					Identifier:   reqWithCallback.Identifier,
-					Response:     result,
-					Err:          err,
+					Request:        reqWithCallback.Request,
+					FinishReason:   finish,
+					Identifier:     reqWithCallback.Identifier,
+					Response:       result.Response,
+					FunctionName:   result.FunctionName,
+					FunctionParams: result.FunctionParams,
+					Err:            err,
 				})
 				if overallBar != nil {
 					overallBar.IncrBy(reqWithCallback.Request.MaxTokens)
@@ -164,19 +174,23 @@ func (g *GPTParallel) RunRequestsChan(requestsChan <-chan RequestWithCallback, c
 
 				result, finish, err := g.chatCompletionWithExponentialBackoff(barName, reqWithCallback.Request)
 				go reqWithCallback.Callback(RequestResult{
-					Request:      reqWithCallback.Request,
-					FinishReason: finish,
-					Response:     result,
-					Identifier:   reqWithCallback.Identifier,
-					Err:          err,
+					Request:        reqWithCallback.Request,
+					FinishReason:   finish,
+					Response:       result.Response,
+					FunctionName:   result.FunctionName,
+					FunctionParams: result.FunctionParams,
+					Identifier:     reqWithCallback.Identifier,
+					Err:            err,
 				})
 
 				resultsChan <- RequestResult{
-					Request:      reqWithCallback.Request,
-					FinishReason: finish,
-					Response:     result,
-					Identifier:   reqWithCallback.Identifier,
-					Err:          err,
+					Request:        reqWithCallback.Request,
+					FinishReason:   finish,
+					Response:       result.Response,
+					FunctionName:   result.FunctionName,
+					FunctionParams: result.FunctionParams,
+					Identifier:     reqWithCallback.Identifier,
+					Err:            err,
 				}
 				if overallBar != nil {
 					overallBar.IncrBy(reqWithCallback.Request.MaxTokens)
@@ -196,13 +210,19 @@ func (g *GPTParallel) RunRequestsChan(requestsChan <-chan RequestWithCallback, c
 	return resultsChan
 }
 
-func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest, bar *mpb.Bar) (string, string, error) {
+func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest, bar *mpb.Bar) (*ResponseWithFunction, string, error) {
 	req.Stream = true
 	stream, err := g.Client.CreateChatCompletionStream(g.ctx, req)
 	if err != nil {
-		return "", "", err
+		return nil, "", err
 	}
 	defer stream.Close()
+
+	res := &ResponseWithFunction{
+		Response:       "",
+		FunctionName:   "",
+		FunctionParams: "",
+	}
 
 	// Get encoding
 	model := req.Model
@@ -218,10 +238,9 @@ func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest
 
 	encoding, err := tiktoken.EncodingForModel(model)
 	if err != nil {
-		return "", "", err
+		return nil, "", err
 	}
 
-	result := ""
 	lastFinish := ""
 
 	for {
@@ -236,20 +255,28 @@ func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest
 				bar.EwmaIncrInt64(int64(req.MaxTokens)-bar.Current(), iterDuration)
 				bar.Wait()
 			}
-			return result, lastFinish, nil
+			return res, lastFinish, nil
 		}
 
 		if err != nil {
-
-			return result, "", err
+			return res, "", err
 		}
 
 		if len(response.Choices) > 0 {
-			chunk := response.Choices[0].Delta.Content
-			result += chunk
-			lastFinish = string(response.Choices[0].FinishReason)
-			//g.Logger.Debug("Finish reason", response.Choices[0].FinishReason)
 
+			chunk := response.Choices[0].Delta.Content
+			res.Response += chunk
+			lastFinish = string(response.Choices[0].FinishReason)
+			//g.Logger.Debug("Chunk finish reason", response.Choices[0].FinishReason, chunk)
+			if response.Choices[0].Delta.FunctionCall != nil {
+				//g.Logger.Debug("Got a function_call", response.Choices[0].Delta.FunctionCall.Name, response.Choices[0].Delta.FunctionCall.Arguments)
+				if response.Choices[0].Delta.FunctionCall.Name != "" {
+					res.FunctionName += response.Choices[0].Delta.FunctionCall.Name
+				}
+				if response.Choices[0].Delta.FunctionCall.Arguments != "" {
+					res.FunctionParams += response.Choices[0].Delta.FunctionCall.Arguments
+				}
+			}
 			if bar != nil {
 				tokenCount := len(encoding.Encode(chunk, nil, nil))
 				bar.EwmaIncrInt64(int64(tokenCount), iterDuration)
@@ -258,8 +285,9 @@ func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest
 	}
 }
 
-func (g *GPTParallel) chatCompletionWithExponentialBackoff(name string, req openai.ChatCompletionRequest) (string, string, error) {
-	var result, finish string
+func (g *GPTParallel) chatCompletionWithExponentialBackoff(name string, req openai.ChatCompletionRequest) (*ResponseWithFunction, string, error) {
+	var result *ResponseWithFunction
+	var finish string
 
 	//backoff.Retry contract only permits returning an error.
 	operation := func() error {
