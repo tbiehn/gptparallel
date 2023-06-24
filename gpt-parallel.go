@@ -286,7 +286,7 @@ func (g *GPTParallel) chatCompletionWithBackoff(req openai.ChatCompletionRequest
 }
 
 func (g *GPTParallel) chatCompletionWithExponentialBackoff(name string, req openai.ChatCompletionRequest) (*ResponseWithFunction, string, error) {
-	var result *ResponseWithFunction
+	result := &ResponseWithFunction{}
 	var finish string
 
 	//backoff.Retry contract only permits returning an error.
